@@ -158,7 +158,7 @@ export default function Medical() {
   const handleSaveFollowUp = async () => {
     if (!selectedRecord) return;
     try {
-      await apiPut(`/medical/records/${selectedRecord.id}/follow-up`, {
+      await apiPut(`/medical/${selectedRecord.id}/follow-up`, {
         followUpDate: followUpForm.date || null,
         followUpNotes: followUpForm.notes
       });

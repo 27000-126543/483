@@ -120,17 +120,19 @@ export class PaymentModel extends BaseModel<Payment> {
   }
 
   getRevenueByDateRange(startDate: string, endDate: string, storeId?: string) {
+    const startDateTime = `${startDate} 00:00:00`;
+    const endDateTime = `${endDate} 23:59:59`;
     const where = storeId
-      ? 'WHERE p.created_at >= ? AND p.created_at <= ? AND a.store_id = ? AND p.status = "paid"'
-      : 'WHERE p.created_at >= ? AND p.created_at <= ? AND p.status = "paid"';
-    const params = storeId ? [startDate, endDate, storeId] : [startDate, endDate];
+      ? 'WHERE p.paid_at >= ? AND p.paid_at <= ? AND a.store_id = ? AND p.status = "paid"'
+      : 'WHERE p.paid_at >= ? AND p.paid_at <= ? AND p.status = "paid"';
+    const params = storeId ? [startDateTime, endDateTime, storeId] : [startDateTime, endDateTime];
 
     const rows = fetchAll(
-      `SELECT DATE(p.created_at) as date, SUM(p.final_amount) as total
+      `SELECT DATE(p.paid_at) as date, SUM(p.final_amount) as total
        FROM payments p
        JOIN appointments a ON p.appointment_id = a.id
        ${where}
-       GROUP BY DATE(p.created_at)`,
+       GROUP BY DATE(p.paid_at)`,
       params
     );
     return rows;

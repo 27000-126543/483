@@ -52,6 +52,8 @@ export class MedicalRecordModel extends BaseModel<MedicalRecord> {
       treatment: row.treatment,
       notes: row.notes,
       prescriptionId: row.prescription_id || undefined,
+      followUpDate: row.follow_up_date || undefined,
+      followUpNotes: row.follow_up_notes || undefined,
       createdAt: row.created_at
     }));
   }
@@ -75,6 +77,8 @@ export class MedicalRecordModel extends BaseModel<MedicalRecord> {
       notes: row.notes,
       petId: row.pet_id,
       prescriptionId: row.prescription_id || undefined,
+      followUpDate: row.follow_up_date || undefined,
+      followUpNotes: row.follow_up_notes || undefined,
       createdAt: row.created_at
     }));
   }

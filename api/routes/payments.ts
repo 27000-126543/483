@@ -355,6 +355,9 @@ router.get('/store/:storeId/orders', authMiddleware, requireRole('manager', 'adm
       return;
     }
 
+    const startDateTime = `${startDate as string} 00:00:00`;
+    const endDateTime = `${endDate as string} 23:59:59`;
+
     const rows = fetchAll(
       `SELECT p.*, a.appointment_code, a.appointment_time, u.name as owner_name,
               u.phone as owner_phone,
@@ -367,7 +370,7 @@ router.get('/store/:storeId/orders', authMiddleware, requireRole('manager', 'adm
        AND p.paid_at >= ?
        AND p.paid_at <= ?
        ORDER BY p.paid_at DESC`,
-      [req.params.storeId, startDate as string, endDate as string]
+      [req.params.storeId, startDateTime, endDateTime]
     );
 
     res.json({

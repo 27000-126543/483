@@ -60,6 +60,44 @@ export default function Reports() {
     }
   };
 
+  const handleExport = () => {
+    if (!paymentSummary?.byStore) return;
+
+    const headers = ['排名', '门店名称', '订单数', '原价总额', '会员折扣', '积分抵扣', '实际营收'];
+    const rows = paymentSummary.byStore.map((store: any, index: number) => [
+      index + 1,
+      store.storeName,
+      store.orderCount,
+      store.totalOriginal?.toFixed(2) || '0.00',
+      store.totalDiscount?.toFixed(2) || '0.00',
+      store.totalPointsDeduction?.toFixed(2) || '0.00',
+      store.totalRevenue?.toFixed(2) || '0.00'
+    ]);
+
+    rows.push([
+      '合计',
+      '',
+      paymentSummary.overall?.orderCount || 0,
+      paymentSummary.overall?.totalOriginal?.toFixed(2) || '0.00',
+      paymentSummary.overall?.totalDiscount?.toFixed(2) || '0.00',
+      paymentSummary.overall?.totalPointsDeduction?.toFixed(2) || '0.00',
+      paymentSummary.overall?.totalRevenue?.toFixed(2) || '0.00'
+    ]);
+
+    const csvContent = [
+      `支付汇总报表 (${startDate} 至 ${endDate})`,
+      '',
+      headers.join(','),
+      ...rows.map(row => row.join(','))
+    ].join('\n');
+
+    const blob = new Blob(['\ufeff' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `支付汇总_${startDate}_${endDate}.csv`;
+    link.click();
+  };
+
   const loadStoreOrders = async (storeId: string, storeName: string) => {
     setOrdersLoading(true);
     setSelectedStore({ id: storeId, name: storeName });
@@ -131,7 +169,10 @@ export default function Reports() {
           >
             <RefreshCw className="w-5 h-5" />
           </button>
-          <button className="flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl font-medium transition-colors">
+          <button
+            onClick={handleExport}
+            className="flex items-center gap-2 bg-green-500 hover:bg-green-600 text-white px-4 py-2 rounded-xl font-medium transition-colors"
+          >
             <Download className="w-5 h-5" />
             导出报表
           </button>
