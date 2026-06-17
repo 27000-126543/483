@@ -305,12 +305,31 @@ export interface CalculatePaymentRequest {
   usePoints: number;
 }
 
+export interface PrescriptionItemForBill {
+  medicineId: string;
+  medicineName: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+  dosage?: string;
+  frequency?: string;
+}
+
 export interface CalculatePaymentResponse {
+  appointmentId: string;
+  appointmentCode: string;
+  consultationFee: number;
+  medicineAmount: number;
+  medicineItems: PrescriptionItemForBill[];
   originalAmount: number;
+  memberLevel: number;
   memberDiscount: number;
+  pointsUsed: number;
   pointsDeduction: number;
+  remainingPoints: number;
   finalAmount: number;
   earnedPoints: number;
+  hasPrescription: boolean;
 }
 
 export interface PaymentRequest {

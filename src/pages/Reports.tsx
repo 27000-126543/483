@@ -1,27 +1,39 @@
 import { useEffect, useState } from 'react';
 import { apiGet } from '../lib/api.js';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line, PieChart, Pie, Cell } from 'recharts';
-import { BarChart3, TrendingUp, Users, DollarSign, Pill, Calendar, Download, RefreshCw } from 'lucide-react';
+import { BarChart3, TrendingUp, Users, DollarSign, Pill, Calendar, Download, RefreshCw, Store, Coins, Percent, CreditCard } from 'lucide-react';
 
 export default function Reports() {
   const [dashboardData, setDashboardData] = useState<any>(null);
   const [satisfactionRanking, setSatisfactionRanking] = useState<any[]>([]);
   const [revenueData, setRevenueData] = useState<any[]>([]);
   const [medicineConsumption, setMedicineConsumption] = useState<any[]>([]);
+  const [paymentSummary, setPaymentSummary] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  const [dateRange, setDateRange] = useState<'today' | 'week' | 'month'>('today');
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState(() => {
+    return new Date().toISOString().split('T')[0];
+  });
 
   useEffect(() => {
     loadData();
-  }, [dateRange]);
+  }, [startDate, endDate]);
 
   const loadData = async () => {
     try {
-      const dashboard = await apiGet<any>('/reports/dashboard');
+      const [dashboard, paymentSum] = await Promise.all([
+        apiGet<any>('/reports/dashboard'),
+        apiGet<any>(`/payments/summary/by-store?startDate=${startDate}&endDate=${endDate} 23:59:59`)
+      ]);
       setDashboardData(dashboard);
       setSatisfactionRanking(dashboard?.satisfactionRanking || []);
       setRevenueData(dashboard?.revenueStats || []);
       setMedicineConsumption((dashboard?.medicineConsumption || []).slice(0, 10));
+      setPaymentSummary(paymentSum);
     } catch (error) {
       console.error('加载报表数据失败:', error);
     } finally {
@@ -47,20 +59,23 @@ export default function Reports() {
           <p className="text-gray-500 mt-1">查看门店运营数据和统计报表</p>
         </div>
         <div className="flex items-center gap-3">
-          <div className="flex gap-2">
-            {(['today', 'week', 'month'] as const).map(range => (
-              <button
-                key={range}
-                onClick={() => setDateRange(range)}
-                className={`px-4 py-2 rounded-xl text-sm font-medium transition-all ${
-                  dateRange === range
-                    ? 'bg-blue-500 text-white'
-                    : 'bg-white text-gray-600 hover:bg-gray-50 border border-gray-200'
-                }`}
-              >
-                {range === 'today' ? '今日' : range === 'week' ? '本周' : '本月'}
-              </button>
-            ))}
+          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1">
+              <Calendar className="w-4 h-4 text-gray-400" />
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+                className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+              />
+            </div>
+            <span className="text-gray-400">至</span>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(e) => setEndDate(e.target.value)}
+              className="text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            />
           </div>
           <button
             onClick={loadData}
@@ -80,11 +95,11 @@ export default function Reports() {
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">今日就诊量</p>
-              <p className="text-3xl font-bold text-gray-800">{dashboardData?.today?.total || 0}</p>
+              <p className="text-sm text-gray-500 mb-1">支付笔数</p>
+              <p className="text-3xl font-bold text-gray-800">{paymentSummary?.overall?.orderCount || 0}</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
-              <Users className="w-6 h-6 text-blue-600" />
+              <CreditCard className="w-6 h-6 text-blue-600" />
             </div>
           </div>
         </div>
@@ -92,8 +107,8 @@ export default function Reports() {
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">今日营收</p>
-              <p className="text-3xl font-bold text-gray-800">¥{dashboardData?.stats?.totalRevenue?.toFixed(2) || '0.00'}</p>
+              <p className="text-sm text-gray-500 mb-1">营收总额</p>
+              <p className="text-3xl font-bold text-green-600">¥{paymentSummary?.overall?.totalRevenue?.toFixed(2) || '0.00'}</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
               <DollarSign className="w-6 h-6 text-green-600" />
@@ -104,26 +119,23 @@ export default function Reports() {
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">平均满意度</p>
-              <p className="text-3xl font-bold text-gray-800">{dashboardData?.stats?.avgSatisfaction?.toFixed(1) || '0.0'}</p>
+              <p className="text-sm text-gray-500 mb-1">会员折扣总额</p>
+              <p className="text-3xl font-bold text-purple-600">¥{paymentSummary?.overall?.totalDiscount?.toFixed(2) || '0.00'}</p>
             </div>
-            <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
-              <BarChart3 className="w-6 h-6 text-yellow-600" />
+            <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
+              <Percent className="w-6 h-6 text-purple-600" />
             </div>
-          </div>
-          <div className="mt-3 flex items-center text-sm">
-            <span className="text-gray-400">满分 5.0</span>
           </div>
         </div>
 
         <div className="bg-white rounded-xl p-5 shadow-sm border border-gray-100">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-500 mb-1">药品消耗</p>
-              <p className="text-3xl font-bold text-gray-800">{medicineConsumption.reduce((sum: number, m: any) => sum + (m.total_quantity || m.quantity || 0), 0)}</p>
+              <p className="text-sm text-gray-500 mb-1">积分抵扣总额</p>
+              <p className="text-3xl font-bold text-yellow-600">¥{paymentSummary?.overall?.totalPointsDeduction?.toFixed(2) || '0.00'}</p>
             </div>
-            <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
-              <Pill className="w-6 h-6 text-purple-600" />
+            <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
+              <Coins className="w-6 h-6 text-yellow-600" />
             </div>
           </div>
         </div>
@@ -231,6 +243,62 @@ export default function Reports() {
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      <div className="mt-6 bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="font-semibold text-gray-800 flex items-center gap-2">
+            <Store className="w-5 h-5 text-blue-500" />
+            各门店收入排行
+          </h3>
+          <p className="text-sm text-gray-500">
+            共 {paymentSummary?.overall?.storeCount || 0} 家门店
+          </p>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-gray-100">
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">排名</th>
+                <th className="text-left px-4 py-3 text-sm font-medium text-gray-500">门店名称</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">订单数</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">原价总额</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">会员折扣</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">积分抵扣</th>
+                <th className="text-right px-4 py-3 text-sm font-medium text-gray-500">实际营收</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {paymentSummary?.byStore?.map((store: any, index: number) => (
+                <tr key={store.storeId} className="hover:bg-gray-50">
+                  <td className="px-4 py-3">
+                    <span className={`w-7 h-7 rounded-full inline-flex items-center justify-center text-xs font-bold ${
+                      index === 0 ? 'bg-yellow-100 text-yellow-700' :
+                      index === 1 ? 'bg-gray-200 text-gray-700' :
+                      index === 2 ? 'bg-orange-100 text-orange-700' :
+                      'bg-gray-100 text-gray-500'
+                    }`}>
+                      {index + 1}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-sm font-medium text-gray-800">{store.storeName}</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 text-right">{store.orderCount} 单</td>
+                  <td className="px-4 py-3 text-sm text-gray-600 text-right">¥{store.totalOriginal?.toFixed(2) || '0.00'}</td>
+                  <td className="px-4 py-3 text-sm text-purple-600 text-right">-¥{store.totalDiscount?.toFixed(2) || '0.00'}</td>
+                  <td className="px-4 py-3 text-sm text-blue-600 text-right">-¥{store.totalPointsDeduction?.toFixed(2) || '0.00'}</td>
+                  <td className="px-4 py-3 text-sm font-bold text-green-600 text-right">¥{store.totalRevenue?.toFixed(2) || '0.00'}</td>
+                </tr>
+              ))}
+              {(!paymentSummary?.byStore || paymentSummary.byStore.length === 0) && (
+                <tr>
+                  <td colSpan={7} className="px-4 py-12 text-center text-gray-400 text-sm">
+                    暂无数据
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
         </div>
       </div>
 

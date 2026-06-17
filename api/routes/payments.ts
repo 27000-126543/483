@@ -4,11 +4,14 @@ import { userModel } from '../db/models/User.js';
 import { appointmentModel } from '../db/models/Appointment.js';
 import { prescriptionModel } from '../db/models/Prescription.js';
 import { medicalRecordModel } from '../db/models/MedicalRecord.js';
+import { medicineModel } from '../db/models/Medicine.js';
 import { AuthRequest, authMiddleware, requireRole } from '../middleware/auth.js';
 import { sendNotification } from '../services/socket.js';
-import { CalculatePaymentRequest, CalculatePaymentResponse, PaymentRequest } from '../../shared/types.js';
+import { fetchAll } from '../db/database.js';
+import { CalculatePaymentRequest, CalculatePaymentResponse, PaymentRequest, PrescriptionItemForBill } from '../../shared/types.js';
 
 const router = Router();
+const CONSULTATION_FEE = 50;
 
 router.post('/calculate', authMiddleware, requireRole('owner'), (req: AuthRequest, res: Response): void => {
   try {
@@ -17,7 +20,7 @@ router.post('/calculate', authMiddleware, requireRole('owner'), (req: AuthReques
       return;
     }
 
-    const { appointmentId, usePoints }: CalculatePaymentRequest = req.body;
+    const { appointmentId, usePoints = 0 }: CalculatePaymentRequest = req.body;
 
     if (!appointmentId) {
       res.status(400).json({ error: '请提供预约ID' });
@@ -42,35 +45,54 @@ router.post('/calculate', authMiddleware, requireRole('owner'), (req: AuthReques
     }
 
     const record = medicalRecordModel.findByAppointmentId(appointmentId);
-    if (!record) {
-      res.status(400).json({ error: '该预约尚未完成诊疗' });
-      return;
-    }
+    const prescription = record ? prescriptionModel.findByMedicalRecordId(record.id) : null;
 
-    const prescription = prescriptionModel.findByMedicalRecordId(record.id);
     if (!prescription) {
-      res.status(400).json({ error: '该预约尚未开具处方' });
+      res.status(400).json({ error: '该预约尚未开具处方，请完成诊疗后再支付', hasPrescription: false });
       return;
     }
 
-    const medicineTotal = prescriptionModel.calculateTotal(prescription.id);
-    const consultationFee = 50;
-    const originalAmount = medicineTotal + consultationFee;
+    const prescriptionItems = prescriptionModel.getItems(prescription.id);
+    const medicineItems: PrescriptionItemForBill[] = prescriptionItems.map(item => {
+      const medicine = medicineModel.findById(item.medicineId);
+      return {
+        medicineId: item.medicineId,
+        medicineName: medicine?.name || '未知药品',
+        quantity: item.quantity,
+        unitPrice: medicine?.price || 0,
+        subtotal: (medicine?.price || 0) * item.quantity,
+        dosage: item.dosage,
+        frequency: item.frequency
+      };
+    });
+
+    const medicineAmount = medicineItems.reduce((sum, item) => sum + item.subtotal, 0);
+    const originalAmount = medicineAmount + CONSULTATION_FEE;
 
     const memberDiscount = paymentModel.calculateMemberDiscount(originalAmount, user.memberLevel);
 
-    const maxPointsToUse = Math.min(usePoints || 0, user.memberPoints);
-    const pointsDeduction = paymentModel.calculatePointsDeduction(maxPointsToUse);
+    const actualUsePoints = Math.min(Math.max(0, usePoints), user.memberPoints);
+    const pointsDeduction = paymentModel.calculatePointsDeduction(actualUsePoints);
 
-    const finalAmount = Math.max(0, originalAmount - memberDiscount - pointsDeduction);
+    const finalAmount = Math.max(0, Math.round((originalAmount - memberDiscount - pointsDeduction) * 100) / 100);
     const earnedPoints = paymentModel.calculateEarnedPoints(finalAmount);
+    const remainingPoints = user.memberPoints - actualUsePoints + earnedPoints;
 
     const response: CalculatePaymentResponse = {
+      appointmentId: appointment.id,
+      appointmentCode: appointment.appointmentCode,
+      consultationFee: CONSULTATION_FEE,
+      medicineAmount,
+      medicineItems,
       originalAmount,
+      memberLevel: user.memberLevel,
       memberDiscount,
+      pointsUsed: actualUsePoints,
       pointsDeduction,
+      remainingPoints,
       finalAmount,
-      earnedPoints
+      earnedPoints,
+      hasPrescription: true
     };
 
     res.json(response);
@@ -89,7 +111,7 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
 
     const { appointmentId, amount, paymentMethod, usePoints }: PaymentRequest = req.body;
 
-    if (!appointmentId || !amount || !paymentMethod) {
+    if (!appointmentId || paymentMethod === undefined || paymentMethod === null) {
       res.status(400).json({ error: '请填写完整的支付信息' });
       return;
     }
@@ -113,14 +135,19 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
 
     const record = medicalRecordModel.findByAppointmentId(appointmentId);
     const prescription = record ? prescriptionModel.findByMedicalRecordId(record.id) : null;
-    const medicineTotal = prescription ? prescriptionModel.calculateTotal(prescription.id) : 0;
-    const consultationFee = 50;
-    const originalAmount = medicineTotal + consultationFee;
+
+    if (!prescription) {
+      res.status(400).json({ error: '该预约尚未开具处方，请完成诊疗后再支付', hasPrescription: false });
+      return;
+    }
+
+    const medicineTotal = prescriptionModel.calculateTotal(prescription.id);
+    const originalAmount = medicineTotal + CONSULTATION_FEE;
 
     const memberDiscount = paymentModel.calculateMemberDiscount(originalAmount, user.memberLevel);
-    const actualUsePoints = Math.min(usePoints || 0, user.memberPoints);
+    const actualUsePoints = Math.min(Math.max(0, usePoints || 0), user.memberPoints);
     const pointsDeduction = paymentModel.calculatePointsDeduction(actualUsePoints);
-    const serverFinalAmount = Math.max(0, originalAmount - memberDiscount - pointsDeduction);
+    const serverFinalAmount = Math.max(0, Math.round((originalAmount - memberDiscount - pointsDeduction) * 100) / 100);
 
     if (Math.abs(serverFinalAmount - amount) > 0.01) {
       res.status(400).json({
@@ -182,15 +209,36 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
       req.user.id,
       'payment',
       '支付成功',
-      `您已成功支付 ¥${serverFinalAmount.toFixed(2)}，获得 ${earnedPoints} 积分。感谢您的信任！`,
+      `预约码：${appointment.appointmentCode}\n实付金额：¥${serverFinalAmount.toFixed(2)}\n获得积分：${earnedPoints}积分\n点击查看电子账单详情`,
       payment.id
     );
 
     const updatedUser = userModel.findById(req.user.id);
     const { passwordHash, ...userWithoutPassword } = updatedUser!;
 
+    const prescriptionItems = prescriptionModel.getItems(prescription.id);
+    const medicineItems = prescriptionItems.map(item => {
+      const medicine = medicineModel.findById(item.medicineId);
+      return {
+        medicineId: item.medicineId,
+        medicineName: medicine?.name || '未知药品',
+        quantity: item.quantity,
+        unitPrice: medicine?.price || 0,
+        subtotal: (medicine?.price || 0) * item.quantity
+      };
+    });
+
     res.json({
-      payment,
+      payment: {
+        ...payment,
+        appointmentCode: appointment.appointmentCode,
+        consultationFee: CONSULTATION_FEE,
+        medicineAmount: medicineTotal,
+        medicineItems,
+        pointsUsed: actualUsePoints,
+        earnedPoints,
+        memberLevel: user.memberLevel
+      },
       user: userWithoutPassword
     });
   } catch (error) {
@@ -228,21 +276,108 @@ router.get('/:id', authMiddleware, (req: AuthRequest, res: Response): void => {
     }
 
     const appointment = appointmentModel.findById(payment.appointmentId);
-    if (req.user.role === 'owner' && appointment?.ownerId !== req.user.id) {
+    if (!appointment) {
+      res.status(404).json({ error: '预约不存在' });
+      return;
+    }
+
+    if (req.user.role === 'owner' && appointment.ownerId !== req.user.id) {
       res.status(403).json({ error: '无权访问此支付记录' });
       return;
     }
 
     if ((req.user.role === 'doctor' || req.user.role === 'pharmacist' || req.user.role === 'manager') &&
-        req.user.storeId && appointment?.storeId !== req.user.storeId) {
+        req.user.storeId && appointment.storeId !== req.user.storeId) {
       res.status(403).json({ error: '无权访问此支付记录' });
       return;
     }
 
-    res.json(payment);
+    const record = medicalRecordModel.findByAppointmentId(payment.appointmentId);
+    const prescription = record ? prescriptionModel.findByMedicalRecordId(record.id) : null;
+    const prescriptionItems = prescription ? prescriptionModel.getItems(prescription.id) : [];
+    const medicineItems = prescriptionItems.map(item => {
+      const medicine = medicineModel.findById(item.medicineId);
+      return {
+        medicineId: item.medicineId,
+        medicineName: medicine?.name || '未知药品',
+        quantity: item.quantity,
+        unitPrice: medicine?.price || 0,
+        subtotal: (medicine?.price || 0) * item.quantity,
+        dosage: item.dosage,
+        frequency: item.frequency
+      };
+    });
+
+    const user = userModel.findById(appointment.ownerId);
+
+    res.json({
+      ...payment,
+      appointmentCode: appointment.appointmentCode,
+      appointmentTime: appointment.appointmentTime,
+      symptoms: appointment.symptoms,
+      consultationFee: CONSULTATION_FEE,
+      medicineAmount: medicineItems.reduce((sum, item) => sum + item.subtotal, 0),
+      medicineItems,
+      memberLevel: user?.memberLevel || 1,
+      ownerName: user?.name,
+      storeId: appointment.storeId
+    });
   } catch (error) {
     console.error('获取支付详情失败:', error);
     res.status(500).json({ error: '获取支付详情失败' });
+  }
+});
+
+router.get('/summary/by-store', authMiddleware, requireRole('manager', 'admin'), (req: AuthRequest, res: Response): void => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      res.status(400).json({ error: '请提供开始和结束日期' });
+      return;
+    }
+
+    const rows = fetchAll(
+      `SELECT a.store_id, s.name as store_name,
+              COUNT(*) as order_count,
+              SUM(p.original_amount) as total_original,
+              SUM(p.member_discount) as total_discount,
+              SUM(p.points_deduction) as total_points_deduction,
+              SUM(p.final_amount) as total_revenue
+       FROM payments p
+       JOIN appointments a ON p.appointment_id = a.id
+       JOIN stores s ON a.store_id = s.id
+       WHERE p.status = 'paid'
+       AND p.paid_at >= ?
+       AND p.paid_at <= ?
+       GROUP BY a.store_id, s.name
+       ORDER BY total_revenue DESC`,
+      [startDate as string, endDate as string]
+    );
+
+    const overall = {
+      orderCount: rows.reduce((sum: number, r: any) => sum + r.order_count, 0),
+      totalOriginal: rows.reduce((sum: number, r: any) => sum + r.total_original, 0),
+      totalDiscount: rows.reduce((sum: number, r: any) => sum + r.total_discount, 0),
+      totalPointsDeduction: rows.reduce((sum: number, r: any) => sum + r.total_points_deduction, 0),
+      totalRevenue: rows.reduce((sum: number, r: any) => sum + r.total_revenue, 0),
+      storeCount: rows.length
+    };
+
+    res.json({
+      overall,
+      byStore: rows.map((r: any) => ({
+        storeId: r.store_id,
+        storeName: r.store_name,
+        orderCount: r.order_count,
+        totalOriginal: r.total_original,
+        totalDiscount: r.total_discount,
+        totalPointsDeduction: r.total_points_deduction,
+        totalRevenue: r.total_revenue
+      }))
+    });
+  } catch (error) {
+    console.error('获取支付汇总失败:', error);
+    res.status(500).json({ error: '获取支付汇总失败' });
   }
 });
 
