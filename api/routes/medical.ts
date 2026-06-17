@@ -6,8 +6,55 @@ import { AuthRequest, authMiddleware, requireRole } from '../middleware/auth.js'
 import { sendNotification } from '../services/socket.js';
 import { CreateMedicalRecordRequest } from '../../shared/types.js';
 import { appointmentModel } from '../db/models/Appointment.js';
+import { userModel } from '../db/models/User.js';
+import { petModel } from '../db/models/Pet.js';
 
 const router = Router();
+
+router.get('/records', authMiddleware, (req: AuthRequest, res: Response): void => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: '请先登录' });
+      return;
+    }
+
+    let records: any[];
+    if (req.user.role === 'owner') {
+      records = medicalRecordModel.findByOwnerId(req.user.id);
+    } else if (req.user.role === 'doctor') {
+      records = medicalRecordModel.findByDoctorId(req.user.id);
+    } else {
+      records = medicalRecordModel.findByOwnerId(req.user.id);
+    }
+
+    const recordsWithDetails = records.map(record => {
+      const prescription = record.prescriptionId
+        ? prescriptionModel.findById(record.prescriptionId)
+        : null;
+      const prescriptionItems = prescription
+        ? prescriptionModel.getItems(prescription.id)
+        : [];
+      const doctor = userModel.findById(record.doctorId);
+      const appointment = appointmentModel.findById(record.appointmentId);
+      let pet: any = null;
+      if (record.petId || appointment?.petId) {
+        pet = petModel.findById(record.petId || appointment?.petId);
+      }
+      return {
+        ...record,
+        doctorName: doctor?.name,
+        petName: pet?.name,
+        petId: record.petId || appointment?.petId,
+        prescription: prescription ? { ...prescription, items: prescriptionItems } : null
+      };
+    });
+
+    res.json(recordsWithDetails);
+  } catch (error) {
+    console.error('获取病历列表失败:', error);
+    res.status(500).json({ error: '获取病历列表失败' });
+  }
+});
 
 router.get('/pet/:petId', authMiddleware, requireRole('owner', 'doctor', 'manager'), (req: AuthRequest, res: Response): void => {
   try {
@@ -18,11 +65,24 @@ router.get('/pet/:petId', authMiddleware, requireRole('owner', 'doctor', 'manage
 
     const records = medicalRecordModel.findByPetId(req.params.petId);
 
-    if (req.user.role === 'owner') {
-      const pet = records[0] ? null : null;
-    }
+    const recordsWithDetails = records.map(record => {
+      const prescription = record.prescriptionId
+        ? prescriptionModel.findById(record.prescriptionId)
+        : null;
+      const prescriptionItems = prescription
+        ? prescriptionModel.getItems(prescription.id)
+        : [];
+      const doctor = userModel.findById(record.doctorId);
+      const appointment = appointmentModel.findById(record.appointmentId);
+      return {
+        ...record,
+        doctorName: doctor?.name,
+        petName: appointment ? petModel.findById(appointment.petId)?.name : undefined,
+        prescription: prescription ? { ...prescription, items: prescriptionItems } : null
+      };
+    });
 
-    res.json(records);
+    res.json(recordsWithDetails);
   } catch (error) {
     console.error('获取病历记录失败:', error);
     res.status(500).json({ error: '获取病历记录失败' });

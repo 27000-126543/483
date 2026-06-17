@@ -150,16 +150,33 @@ router.post('/prescriptions/:id/dispense', authMiddleware, requireRole('pharmaci
       return;
     }
 
+    const insufficientItems: { name: string; required: number; available: number }[] = [];
     for (const item of items) {
-      const result = inventoryModel.updateQuantity(
+      const medicine = medicineModel.findById(item.medicineId);
+      const check = inventoryModel.checkAvailability(appointment.storeId, item.medicineId, item.quantity);
+      if (!check.available) {
+        insufficientItems.push({
+          name: medicine?.name || '未知药品',
+          required: item.quantity,
+          available: check.currentStock
+        });
+      }
+    }
+
+    if (insufficientItems.length > 0) {
+      const details = insufficientItems
+        .map(i => `${i.name}(需要${i.required}, 库存${i.available})`)
+        .join('、');
+      res.status(400).json({ error: `库存不足: ${details}`, insufficientItems });
+      return;
+    }
+
+    for (const item of items) {
+      inventoryModel.updateQuantity(
         appointment.storeId,
         item.medicineId,
         -item.quantity
       );
-      if (!result || result.quantity < 0) {
-        res.status(400).json({ error: `${item.medicine?.name || '药品'}库存不足` });
-        return;
-      }
     }
 
     const dispenseRecord = dispenseRecordModel.create({

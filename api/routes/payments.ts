@@ -120,7 +120,18 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
     const memberDiscount = paymentModel.calculateMemberDiscount(originalAmount, user.memberLevel);
     const actualUsePoints = Math.min(usePoints || 0, user.memberPoints);
     const pointsDeduction = paymentModel.calculatePointsDeduction(actualUsePoints);
-    const earnedPoints = paymentModel.calculateEarnedPoints(amount);
+    const serverFinalAmount = Math.max(0, originalAmount - memberDiscount - pointsDeduction);
+
+    if (Math.abs(serverFinalAmount - amount) > 0.01) {
+      res.status(400).json({
+        error: `支付金额校验失败: 服务端计算金额为 ¥${serverFinalAmount.toFixed(2)}，与提交金额 ¥${amount.toFixed(2)} 不一致`,
+        serverAmount: serverFinalAmount,
+        submittedAmount: amount
+      });
+      return;
+    }
+
+    const earnedPoints = paymentModel.calculateEarnedPoints(serverFinalAmount);
 
     const existingPayment = paymentModel.findByAppointmentId(appointmentId);
     if (existingPayment && existingPayment.status === 'paid') {
@@ -135,7 +146,7 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
           originalAmount,
           memberDiscount,
           pointsDeduction,
-          finalAmount: amount,
+          finalAmount: serverFinalAmount,
           paymentMethod,
           status: 'paid',
           paidAt: new Date().toISOString()
@@ -171,7 +182,7 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
       req.user.id,
       'payment',
       '支付成功',
-      `您已成功支付 ¥${amount.toFixed(2)}，获得 ${earnedPoints} 积分。感谢您的信任！`,
+      `您已成功支付 ¥${serverFinalAmount.toFixed(2)}，获得 ${earnedPoints} 积分。感谢您的信任！`,
       payment.id
     );
 

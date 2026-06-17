@@ -1,6 +1,6 @@
 import { BaseModel } from './BaseModel.js';
 import { MedicalRecord } from '../../../shared/types.js';
-import { executeQuery, fetchOne } from '../database.js';
+import { executeQuery, fetchAll, fetchOne } from '../database.js';
 
 export class MedicalRecordModel extends BaseModel<MedicalRecord> {
   protected tableName = 'medical_records';
@@ -13,6 +13,7 @@ export class MedicalRecordModel extends BaseModel<MedicalRecord> {
       diagnosis: row.diagnosis,
       treatment: row.treatment,
       notes: row.notes,
+      prescriptionId: row.prescription_id || undefined,
       createdAt: row.created_at
     };
   }
@@ -31,12 +32,49 @@ export class MedicalRecordModel extends BaseModel<MedicalRecord> {
     return row ? this.fromRow(row) : null;
   }
 
-  findByPetId(petId: string): MedicalRecord[] {
-    return this.findAll(
-      'mr.appointment_id = a.id AND a.pet_id = ?',
-      [petId],
-      'mr.created_at DESC'
+  findByPetId(petId: string): any[] {
+    const rows = fetchAll(
+      `SELECT mr.*, p.id as prescription_id, p.status as prescription_status, p.need_confirmation
+       FROM medical_records mr
+       JOIN appointments a ON mr.appointment_id = a.id
+       LEFT JOIN prescriptions p ON p.medical_record_id = mr.id
+       WHERE a.pet_id = ?
+       ORDER BY mr.created_at DESC`,
+      [petId]
     );
+    return rows.map(row => ({
+      id: row.id,
+      appointmentId: row.appointment_id,
+      doctorId: row.doctor_id,
+      diagnosis: row.diagnosis,
+      treatment: row.treatment,
+      notes: row.notes,
+      prescriptionId: row.prescription_id || undefined,
+      createdAt: row.created_at
+    }));
+  }
+
+  findByOwnerId(ownerId: string): any[] {
+    const rows = fetchAll(
+      `SELECT mr.*, a.pet_id, p.id as prescription_id, p.status as prescription_status
+       FROM medical_records mr
+       JOIN appointments a ON mr.appointment_id = a.id
+       LEFT JOIN prescriptions p ON p.medical_record_id = mr.id
+       WHERE a.owner_id = ?
+       ORDER BY mr.created_at DESC`,
+      [ownerId]
+    );
+    return rows.map(row => ({
+      id: row.id,
+      appointmentId: row.appointment_id,
+      doctorId: row.doctor_id,
+      diagnosis: row.diagnosis,
+      treatment: row.treatment,
+      notes: row.notes,
+      petId: row.pet_id,
+      prescriptionId: row.prescription_id || undefined,
+      createdAt: row.created_at
+    }));
   }
 
   findByDoctorId(doctorId: string): MedicalRecord[] {

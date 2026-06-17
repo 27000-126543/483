@@ -110,21 +110,26 @@ export class ReportModel extends BaseModel<Report> {
 
   getSatisfactionRanking(storeId: string, startDate: string, endDate: string) {
     const rows = fetchAll(
-      `SELECT d.id as doctor_id, u.name as doctor_name,
+      `SELECT a.doctor_id, u.name as doctor_name,
               AVG(a.satisfaction) as avg_satisfaction,
-              COUNT(*) as total_count
+              COUNT(*) as appointment_count
        FROM appointments a
        JOIN users u ON a.doctor_id = u.id
-       JOIN doctor_specialties ds ON u.id = ds.doctor_id
        WHERE a.store_id = ?
        AND a.appointment_time >= ?
        AND a.appointment_time <= ?
        AND a.satisfaction IS NOT NULL
-       GROUP BY d.id, u.name
-       ORDER BY avg_satisfaction DESC, total_count DESC`,
+       AND a.doctor_id IS NOT NULL
+       GROUP BY a.doctor_id, u.name
+       ORDER BY avg_satisfaction DESC, appointment_count DESC`,
       [storeId, startDate, endDate]
     );
-    return rows;
+    return rows.map((row: any) => ({
+      doctorId: row.doctor_id,
+      doctorName: row.doctor_name,
+      avgSatisfaction: row.avg_satisfaction,
+      appointmentCount: row.appointment_count
+    }));
   }
 
   getMedicineConsumptionReport(storeId: string, startDate: string, endDate: string) {

@@ -17,16 +17,11 @@ export default function Reports() {
 
   const loadData = async () => {
     try {
-      const [dashboard, satisfaction, revenue, medicine] = await Promise.all([
-        apiGet<any>('/reports/dashboard'),
-        apiGet<any[]>('/reports/satisfaction'),
-        apiGet<any[]>('/reports/revenue'),
-        apiGet<any[]>('/reports/medicine-consumption')
-      ]);
+      const dashboard = await apiGet<any>('/reports/dashboard');
       setDashboardData(dashboard);
-      setSatisfactionRanking(satisfaction);
-      setRevenueData(revenue);
-      setMedicineConsumption(medicine.slice(0, 10));
+      setSatisfactionRanking(dashboard?.satisfactionRanking || []);
+      setRevenueData(dashboard?.revenueStats || []);
+      setMedicineConsumption((dashboard?.medicineConsumption || []).slice(0, 10));
     } catch (error) {
       console.error('加载报表数据失败:', error);
     } finally {
@@ -86,16 +81,11 @@ export default function Reports() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500 mb-1">今日就诊量</p>
-              <p className="text-3xl font-bold text-gray-800">{dashboardData?.todayAppointments || 0}</p>
+              <p className="text-3xl font-bold text-gray-800">{dashboardData?.today?.total || 0}</p>
             </div>
             <div className="w-12 h-12 bg-blue-100 rounded-xl flex items-center justify-center">
               <Users className="w-6 h-6 text-blue-600" />
             </div>
-          </div>
-          <div className="mt-3 flex items-center text-sm">
-            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
-            <span className="text-green-600">+12%</span>
-            <span className="text-gray-400 ml-1">较昨日</span>
           </div>
         </div>
 
@@ -103,16 +93,11 @@ export default function Reports() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500 mb-1">今日营收</p>
-              <p className="text-3xl font-bold text-gray-800">¥{dashboardData?.todayRevenue?.toFixed(2) || '0.00'}</p>
+              <p className="text-3xl font-bold text-gray-800">¥{dashboardData?.stats?.totalRevenue?.toFixed(2) || '0.00'}</p>
             </div>
             <div className="w-12 h-12 bg-green-100 rounded-xl flex items-center justify-center">
               <DollarSign className="w-6 h-6 text-green-600" />
             </div>
-          </div>
-          <div className="mt-3 flex items-center text-sm">
-            <TrendingUp className="w-4 h-4 text-green-500 mr-1" />
-            <span className="text-green-600">+8%</span>
-            <span className="text-gray-400 ml-1">较昨日</span>
           </div>
         </div>
 
@@ -120,7 +105,7 @@ export default function Reports() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500 mb-1">平均满意度</p>
-              <p className="text-3xl font-bold text-gray-800">{dashboardData?.avgSatisfaction?.toFixed(1) || '0.0'}</p>
+              <p className="text-3xl font-bold text-gray-800">{dashboardData?.stats?.avgSatisfaction?.toFixed(1) || '0.0'}</p>
             </div>
             <div className="w-12 h-12 bg-yellow-100 rounded-xl flex items-center justify-center">
               <BarChart3 className="w-6 h-6 text-yellow-600" />
@@ -135,14 +120,11 @@ export default function Reports() {
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm text-gray-500 mb-1">药品消耗</p>
-              <p className="text-3xl font-bold text-gray-800">{dashboardData?.medicineUsed || 0}</p>
+              <p className="text-3xl font-bold text-gray-800">{medicineConsumption.reduce((sum: number, m: any) => sum + (m.total_quantity || m.quantity || 0), 0)}</p>
             </div>
             <div className="w-12 h-12 bg-purple-100 rounded-xl flex items-center justify-center">
               <Pill className="w-6 h-6 text-purple-600" />
             </div>
-          </div>
-          <div className="mt-3 flex items-center text-sm">
-            <span className="text-gray-400">今日出库数量</span>
           </div>
         </div>
       </div>
@@ -156,11 +138,11 @@ export default function Reports() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
                 <XAxis dataKey="date" tick={{ fontSize: 12 }} />
                 <YAxis tick={{ fontSize: 12 }} />
-                <Tooltip formatter={(value: number) => [`¥${value.toFixed(2)}`, '营收']} />
+                <Tooltip formatter={(value: number) => [`¥${value?.toFixed(2) || value}`, '营收']} />
                 <Legend />
                 <Line
                   type="monotone"
-                  dataKey="revenue"
+                  dataKey="total"
                   name="营收"
                   stroke="#3B82F6"
                   strokeWidth={2}
@@ -180,7 +162,7 @@ export default function Reports() {
                 <XAxis type="number" tick={{ fontSize: 12 }} />
                 <YAxis dataKey="name" type="category" tick={{ fontSize: 11 }} width={100} />
                 <Tooltip />
-                <Bar dataKey="quantity" name="消耗量" fill="#10B981" radius={[0, 4, 4, 0]} />
+                <Bar dataKey="total_quantity" name="消耗量" fill="#10B981" radius={[0, 4, 4, 0]} />
               </BarChart>
             </ResponsiveContainer>
           </div>

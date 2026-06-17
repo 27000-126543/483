@@ -108,7 +108,7 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
       return;
     }
 
-    const { petId, storeId, symptoms, appointmentTime, doctorId }: CreateAppointmentRequest & { doctorId?: string } = req.body;
+    const { petId, storeId, symptoms, appointmentTime }: CreateAppointmentRequest = req.body;
 
     if (!petId || !storeId || !symptoms || !appointmentTime) {
       res.status(400).json({ error: '请填写完整的预约信息' });
@@ -121,11 +121,30 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
       return;
     }
 
+    let autoDoctorId: string | undefined;
+    let autoDoctorName: string | undefined;
+
+    const specialties = departmentModel.getDoctorSpecialties(department.id);
+    const doctorsInStore = userModel.findByStoreAndRole(storeId, 'doctor');
+
+    const matchedDoctors = specialties
+      .filter(spec => doctorsInStore.some(d => d.id === spec.doctorId))
+      .map(spec => {
+        const doctor = doctorsInStore.find(d => d.id === spec.doctorId)!;
+        return { id: doctor.id, name: doctor.name, rating: spec.rating };
+      })
+      .sort((a, b) => b.rating - a.rating);
+
+    if (matchedDoctors.length > 0) {
+      autoDoctorId = matchedDoctors[0].id;
+      autoDoctorName = matchedDoctors[0].name;
+    }
+
     const appointment = appointmentModel.create({
       ownerId: req.user.id,
       petId,
       storeId,
-      doctorId,
+      doctorId: autoDoctorId,
       department: department.name,
       symptoms,
       appointmentTime,
@@ -138,16 +157,17 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
       req.user.id,
       'appointment',
       '预约成功',
-      `您已成功预约${department.name}，就诊码：${appointment.appointmentCode}。请准时就诊。`,
+      `您已成功预约${department.name}${autoDoctorName ? '，主治医师：' + autoDoctorName : ''}，就诊码：${appointment.appointmentCode}。请准时就诊。`,
       appointment.id
     );
 
-    if (doctorId) {
+    if (autoDoctorId) {
+      const ownerUser = userModel.findById(req.user.id);
       await sendNotification(
-        doctorId,
+        autoDoctorId,
         'appointment',
         '新的预约',
-        `您有一个新的预约，请及时查看。`,
+        `您有一个新的${department.name}预约，宠物主人：${ownerUser?.name || '未知'}，症状：${symptoms}，请及时查看。`,
         appointment.id
       );
     }

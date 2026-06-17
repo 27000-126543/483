@@ -12,15 +12,22 @@ interface PrescriptionItem {
   duration: string;
 }
 
+interface MedicalRecordWithDetails extends MedicalRecord {
+  doctorName?: string;
+  petName?: string;
+  petId?: string;
+  prescription?: Prescription & { items: any[] };
+}
+
 export default function Medical() {
   const user = useAuthStore(state => state.user);
   const [appointments, setAppointments] = useState<Appointment[]>([]);
-  const [medicalRecords, setMedicalRecords] = useState<MedicalRecord[]>([]);
+  const [medicalRecords, setMedicalRecords] = useState<MedicalRecordWithDetails[]>([]);
   const [showRecordModal, setShowRecordModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [loading, setLoading] = useState(true);
-  const [stockCheck, setStockCheck] = useState<{ available: boolean; substitutes: Medicine[] } | null>(null);
+  const [stockCheck, setStockCheck] = useState<{ available: boolean; substitutes: Medicine[] } | null>( null);
 
   const [recordForm, setRecordForm] = useState({
     diagnosis: '',
@@ -45,7 +52,7 @@ export default function Medical() {
     try {
       const [appointmentsData, recordsData, medicinesData] = await Promise.all([
         apiGet<Appointment[]>('/appointments'),
-        apiGet<MedicalRecord[]>('/medical/records'),
+        apiGet<MedicalRecordWithDetails[]>('/medical/records'),
         apiGet<Medicine[]>('/pharmacy/medicines')
       ]);
       const filteredAppointments = user?.role === 'doctor'
@@ -231,42 +238,126 @@ export default function Medical() {
 
       <div>
         <h2 className="text-lg font-semibold text-gray-800 mb-4">病历记录</h2>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-          <div className="divide-y divide-gray-50">
-            {medicalRecords.map((record) => (
-              <div key={record.id} className="p-5 hover:bg-gray-50 transition-colors">
-                <div className="flex items-start justify-between mb-3">
-                  <div>
-                    <div className="flex items-center gap-3 mb-2">
-                      <h3 className="font-semibold text-gray-800">诊断: {record.diagnosis}</h3>
+        {user?.role === 'owner' ? (
+          Object.entries(
+            medicalRecords.reduce((groups: Record<string, MedicalRecordWithDetails[]>, record) => {
+              const key = record.petId || 'unknown';
+              if (!groups[key]) groups[key] = [];
+              groups[key].push(record);
+              return groups;
+            }, {})
+          ).map(([petId, records]) => (
+            <div key={petId} className="mb-6">
+              <h3 className="text-md font-semibold text-blue-700 mb-3 flex items-center gap-2">
+                <Pill className="w-4 h-4" />
+                {records[0]?.petName || '宠物'}
+              </h3>
+              <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+                <div className="divide-y divide-gray-50">
+                  {records.map((record) => (
+                    <div key={record.id} className="p-5 hover:bg-gray-50 transition-colors">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <div className="flex items-center gap-3 mb-2">
+                            <h3 className="font-semibold text-gray-800">诊断: {record.diagnosis}</h3>
+                          </div>
+                          <p className="text-sm text-gray-500 mb-1">
+                            {new Date(record.createdAt).toLocaleString('zh-CN')}
+                          </p>
+                          {record.doctorName && (
+                            <p className="text-sm text-gray-500">主治医师: {record.doctorName}</p>
+                          )}
+                          {record.treatment && (
+                            <p className="text-sm text-gray-600">治疗方案: {record.treatment}</p>
+                          )}
+                          {record.notes && (
+                            <p className="text-sm text-gray-500 mt-1">备注: {record.notes}</p>
+                          )}
+                        </div>
+                      </div>
+                      {record.prescription && (
+                        <div className="mt-3 pt-3 border-t border-gray-100">
+                          <div className="flex items-center gap-2 mb-2">
+                            <p className="text-sm font-medium text-gray-700">处方信息</p>
+                            {getPrescriptionStatusBadge(record.prescription.status)}
+                          </div>
+                          {record.prescription.items && record.prescription.items.length > 0 && (
+                            <div className="space-y-1">
+                              {record.prescription.items.map((item: any, index: number) => (
+                                <div key={index} className="flex items-center gap-2 text-sm text-gray-600">
+                                  <Pill className="w-3 h-3 text-blue-500" />
+                                  <span>{item.medicine?.name || '药品'} - {item.quantity}份</span>
+                                  {item.dosage && <span className="text-gray-400">|</span>}
+                                  {item.dosage && <span className="text-gray-500">{item.dosage}</span>}
+                                  {item.frequency && <span className="text-gray-500">{item.frequency}</span>}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                    <p className="text-sm text-gray-500 mb-2">
-                      {new Date(record.createdAt).toLocaleString('zh-CN')}
-                    </p>
-                    {record.treatment && (
-                      <p className="text-sm text-gray-600">治疗方案: {record.treatment}</p>
-                    )}
-                    {record.notes && (
-                      <p className="text-sm text-gray-500 mt-1">备注: {record.notes}</p>
-                    )}
-                  </div>
+                  ))}
                 </div>
-                {record.prescriptionId && (
-                  <div className="mt-3 pt-3 border-t border-gray-100">
-                    <p className="text-sm font-medium text-gray-700 mb-2">处方信息</p>
-                    <PrescriptionDetails prescriptionId={record.prescriptionId} />
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100">
+            <div className="divide-y divide-gray-50">
+              {medicalRecords.map((record) => (
+                <div key={record.id} className="p-5 hover:bg-gray-50 transition-colors">
+                  <div className="flex items-start justify-between mb-3">
+                    <div>
+                      <div className="flex items-center gap-3 mb-2">
+                        <h3 className="font-semibold text-gray-800">诊断: {record.diagnosis}</h3>
+                      </div>
+                      <p className="text-sm text-gray-500 mb-2">
+                        {new Date(record.createdAt).toLocaleString('zh-CN')}
+                      </p>
+                      {record.treatment && (
+                        <p className="text-sm text-gray-600">治疗方案: {record.treatment}</p>
+                      )}
+                      {record.notes && (
+                        <p className="text-sm text-gray-500 mt-1">备注: {record.notes}</p>
+                      )}
+                    </div>
                   </div>
-                )}
-              </div>
-            ))}
-            {medicalRecords.length === 0 && (
-              <div className="p-12 text-center text-gray-500">
-                <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
-                <p>暂无病历记录</p>
-              </div>
-            )}
+                  {record.prescription && (
+                    <div className="mt-3 pt-3 border-t border-gray-100">
+                      <div className="flex items-center gap-2 mb-2">
+                        <p className="text-sm font-medium text-gray-700">处方信息</p>
+                        {getPrescriptionStatusBadge(record.prescription.status)}
+                      </div>
+                      {record.prescription.items && record.prescription.items.length > 0 && (
+                        <div className="space-y-1">
+                          {record.prescription.items.map((item: any, index: number) => (
+                            <div key={index} className="flex items-center gap-2 text-sm text-gray-600">
+                              <Pill className="w-3 h-3 text-blue-500" />
+                              <span>{item.medicine?.name || '药品'} - {item.quantity}份</span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+              {medicalRecords.length === 0 && (
+                <div className="p-12 text-center text-gray-500">
+                  <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+                  <p>暂无病历记录</p>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
+        )}
+        {user?.role === 'owner' && medicalRecords.length === 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-12 text-center text-gray-500">
+            <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
+            <p>暂无病历记录</p>
+          </div>
+        )}
       </div>
 
       {showRecordModal && selectedAppointment && (
