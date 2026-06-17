@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useMessageStore } from '../store/messageStore.js';
 import { apiGet } from '../lib/api.js';
 import { Message, MessageType } from '../../shared/types.js';
-import { Bell, Calendar, FileText, CreditCard, MessageSquare, Check, Download, Clock } from 'lucide-react';
+import { Bell, Calendar, FileText, CreditCard, MessageSquare, Check, Download, Clock, RefreshCw } from 'lucide-react';
 
 export default function Messages() {
   const storeMessages = useMessageStore(state => state.messages);
@@ -46,7 +46,8 @@ export default function Messages() {
       prescription: <FileText className="w-5 h-5 text-purple-500" />,
       payment: <CreditCard className="w-5 h-5 text-green-500" />,
       complaint: <MessageSquare className="w-5 h-5 text-orange-500" />,
-      system: <Bell className="w-5 h-5 text-gray-500" />
+      system: <Bell className="w-5 h-5 text-gray-500" />,
+      follow_up: <RefreshCw className="w-5 h-5 text-yellow-500" />
     };
     return icons[type] || <Bell className="w-5 h-5 text-gray-500" />;
   };
@@ -57,7 +58,8 @@ export default function Messages() {
       prescription: '处方通知',
       payment: '支付通知',
       complaint: '投诉通知',
-      system: '系统通知'
+      system: '系统通知',
+      follow_up: '复诊提醒'
     };
     return labels[type] || type;
   };

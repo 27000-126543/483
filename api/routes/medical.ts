@@ -305,4 +305,48 @@ router.put('/prescriptions/:id/confirm', authMiddleware, requireRole('owner'), a
   }
 });
 
+router.put('/:id/follow-up', authMiddleware, requireRole('doctor'), async (req: AuthRequest, res: Response): Promise<void> => {
+  try {
+    if (!req.user) {
+      res.status(401).json({ error: '请先登录' });
+      return;
+    }
+
+    const { followUpDate, followUpNotes } = req.body;
+    const record = medicalRecordModel.findById(req.params.id);
+
+    if (!record) {
+      res.status(404).json({ error: '病历不存在' });
+      return;
+    }
+
+    const appointment = appointmentModel.findById(record.appointmentId);
+    if (appointment?.doctorId && appointment.doctorId !== req.user.id) {
+      res.status(403).json({ error: '您不是该预约的主治医师' });
+      return;
+    }
+
+    const updated = medicalRecordModel.update(req.params.id, {
+      followUpDate: followUpDate || null,
+      followUpNotes: followUpNotes || null
+    });
+
+    if (followUpDate && appointment) {
+      const pet = petModel.findById(appointment.petId);
+      await sendNotification(
+        appointment.ownerId,
+        'follow_up',
+        '复诊提醒已设置',
+        `您的宠物${pet?.name || ''}的复诊提醒已设置，建议复诊日期：${new Date(followUpDate).toLocaleDateString('zh-CN')}，请按时复诊。`,
+        record.id
+      );
+    }
+
+    res.json(updated);
+  } catch (error) {
+    console.error('设置复诊失败:', error);
+    res.status(500).json({ error: '设置复诊失败' });
+  }
+});
+
 export default router;

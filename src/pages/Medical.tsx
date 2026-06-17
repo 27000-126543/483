@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { apiGet, apiPost } from '../lib/api.js';
+import { apiGet, apiPost, apiPut } from '../lib/api.js';
 import { Appointment, MedicalRecord, Prescription, Medicine, PrescriptionStatus } from '../../shared/types.js';
 import { useAuthStore } from '../store/authStore.js';
-import { FileText, Plus, X, Pill, AlertTriangle, Check, Clock, User, Calendar } from 'lucide-react';
+import { FileText, Plus, X, Pill, AlertTriangle, Check, Clock, User, Calendar, RefreshCw, CalendarClock, AlertCircle, Edit2, Save } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 interface PrescriptionItem {
   medicineId: string;
@@ -21,10 +22,14 @@ interface MedicalRecordWithDetails extends MedicalRecord {
 
 export default function Medical() {
   const user = useAuthStore(state => state.user);
+  const navigate = useNavigate();
   const [appointments, setAppointments] = useState<Appointment[]>([]);
   const [medicalRecords, setMedicalRecords] = useState<MedicalRecordWithDetails[]>([]);
   const [showRecordModal, setShowRecordModal] = useState(false);
   const [selectedAppointment, setSelectedAppointment] = useState<Appointment | null>(null);
+  const [selectedRecord, setSelectedRecord] = useState<MedicalRecordWithDetails | null>(null);
+  const [showFollowUpEdit, setShowFollowUpEdit] = useState(false);
+  const [followUpForm, setFollowUpForm] = useState({ date: '', notes: '' });
   const [medicines, setMedicines] = useState<Medicine[]>([]);
   const [loading, setLoading] = useState(true);
   const [stockCheck, setStockCheck] = useState<{ available: boolean; substitutes: Medicine[] } | null>( null);
@@ -141,6 +146,56 @@ export default function Medical() {
     setStockCheck(null);
   };
 
+  const handleFollowUpEdit = (record: MedicalRecordWithDetails) => {
+    setSelectedRecord(record);
+    setFollowUpForm({
+      date: record.followUpDate || '',
+      notes: record.followUpNotes || ''
+    });
+    setShowFollowUpEdit(true);
+  };
+
+  const handleSaveFollowUp = async () => {
+    if (!selectedRecord) return;
+    try {
+      await apiPut(`/medical/records/${selectedRecord.id}/follow-up`, {
+        followUpDate: followUpForm.date || null,
+        followUpNotes: followUpForm.notes
+      });
+      alert('复诊信息已保存');
+      setShowFollowUpEdit(false);
+      loadData();
+    } catch (error: any) {
+      alert(error.message || '保存失败');
+    }
+  };
+
+  const handleReorder = (record: MedicalRecordWithDetails) => {
+    navigate('/appointments/new', {
+      state: {
+        petId: record.petId,
+        petName: record.petName,
+        storeId: selectedAppointment?.storeId,
+        symptoms: record.diagnosis,
+        isFollowUp: true,
+        fromRecordId: record.id
+      }
+    });
+  };
+
+  const getFollowUpStatus = (record: MedicalRecordWithDetails) => {
+    if (!record.followUpDate) return null;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const fuDate = new Date(record.followUpDate);
+    fuDate.setHours(0, 0, 0, 0);
+    const diffDays = Math.ceil((fuDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+    if (diffDays < 0) return { text: '已过期', color: 'bg-gray-100 text-gray-500' };
+    if (diffDays === 0) return { text: '今天复诊', color: 'bg-red-100 text-red-600' };
+    if (diffDays <= 3) return { text: `${diffDays}天后复诊`, color: 'bg-orange-100 text-orange-600' };
+    return { text: `${diffDays}天后复诊`, color: 'bg-blue-100 text-blue-600' };
+  };
+
   const getStatusBadge = (status: string) => {
     const colors: Record<string, string> = {
       pending: 'bg-yellow-100 text-yellow-700',
@@ -254,12 +309,19 @@ export default function Medical() {
               </h3>
               <div className="bg-white rounded-xl shadow-sm border border-gray-100">
                 <div className="divide-y divide-gray-50">
-                  {records.map((record) => (
+                  {records.map((record) => {
+                    const fuStatus = getFollowUpStatus(record);
+                    return (
                     <div key={record.id} className="p-5 hover:bg-gray-50 transition-colors">
                       <div className="flex items-start justify-between mb-3">
                         <div>
                           <div className="flex items-center gap-3 mb-2">
                             <h3 className="font-semibold text-gray-800">诊断: {record.diagnosis}</h3>
+                            {fuStatus && (
+                              <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${fuStatus.color}`}>
+                                {fuStatus.text}
+                              </span>
+                            )}
                           </div>
                           <p className="text-sm text-gray-500 mb-1">
                             {new Date(record.createdAt).toLocaleString('zh-CN')}
@@ -272,6 +334,17 @@ export default function Medical() {
                           )}
                           {record.notes && (
                             <p className="text-sm text-gray-500 mt-1">备注: {record.notes}</p>
+                          )}
+                          {record.followUpDate && (
+                            <div className="mt-2 flex items-start gap-1.5 text-sm">
+                              <CalendarClock className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                              <div>
+                                <span className="text-gray-600">建议复诊：{new Date(record.followUpDate).toLocaleDateString('zh-CN')}</span>
+                                {record.followUpNotes && (
+                                  <p className="text-gray-500 text-xs mt-0.5">{record.followUpNotes}</p>
+                                )}
+                              </div>
+                            </div>
                           )}
                         </div>
                       </div>
@@ -296,8 +369,19 @@ export default function Medical() {
                           )}
                         </div>
                       )}
+                      {record.followUpDate && (
+                        <div className="mt-3 pt-3 border-t border-gray-100 flex justify-end">
+                          <button
+                            onClick={() => handleReorder(record)}
+                            className="flex items-center gap-1.5 text-sm text-blue-600 hover:text-blue-700 font-medium"
+                          >
+                            <RefreshCw className="w-4 h-4" />
+                            一键复诊预约
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  ))}
+                  )})}
                 </div>
               </div>
             </div>
@@ -305,12 +389,19 @@ export default function Medical() {
         ) : (
           <div className="bg-white rounded-xl shadow-sm border border-gray-100">
             <div className="divide-y divide-gray-50">
-              {medicalRecords.map((record) => (
+              {medicalRecords.map((record) => {
+                const fuStatus = getFollowUpStatus(record);
+                return (
                 <div key={record.id} className="p-5 hover:bg-gray-50 transition-colors">
                   <div className="flex items-start justify-between mb-3">
                     <div>
                       <div className="flex items-center gap-3 mb-2">
                         <h3 className="font-semibold text-gray-800">诊断: {record.diagnosis}</h3>
+                        {fuStatus && (
+                          <span className={`px-2 py-0.5 text-xs rounded-full font-medium ${fuStatus.color}`}>
+                            {fuStatus.text}
+                          </span>
+                        )}
                       </div>
                       <p className="text-sm text-gray-500 mb-2">
                         {new Date(record.createdAt).toLocaleString('zh-CN')}
@@ -321,7 +412,27 @@ export default function Medical() {
                       {record.notes && (
                         <p className="text-sm text-gray-500 mt-1">备注: {record.notes}</p>
                       )}
+                      {record.followUpDate && (
+                        <div className="mt-2 flex items-start gap-1.5 text-sm">
+                          <CalendarClock className="w-4 h-4 text-blue-500 mt-0.5 flex-shrink-0" />
+                          <div>
+                            <span className="text-gray-600">建议复诊：{new Date(record.followUpDate).toLocaleDateString('zh-CN')}</span>
+                            {record.followUpNotes && (
+                              <p className="text-gray-500 text-xs mt-0.5">{record.followUpNotes}</p>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
+                    {user?.role === 'doctor' && (
+                      <button
+                        onClick={() => handleFollowUpEdit(record)}
+                        className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                        设置复诊
+                      </button>
+                    )}
                   </div>
                   {record.prescription && (
                     <div className="mt-3 pt-3 border-t border-gray-100">
@@ -342,7 +453,7 @@ export default function Medical() {
                     </div>
                   )}
                 </div>
-              ))}
+              )})}
               {medicalRecords.length === 0 && (
                 <div className="p-12 text-center text-gray-500">
                   <FileText className="w-12 h-12 mx-auto mb-4 text-gray-300" />
@@ -559,6 +670,75 @@ export default function Medical() {
                 className="flex-1 px-4 py-3 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-300 text-white rounded-xl font-medium transition-colors"
               >
                 提交病历与处方
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showFollowUpEdit && selectedRecord && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl w-full max-w-md">
+            <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+              <h3 className="text-lg font-semibold text-gray-800">设置复诊提醒</h3>
+              <button
+                onClick={() => setShowFollowUpEdit(false)}
+                className="text-gray-400 hover:text-gray-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">建议复诊日期</label>
+                <input
+                  type="date"
+                  value={followUpForm.date}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, date: e.target.value })}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1.5">注意事项</label>
+                <textarea
+                  value={followUpForm.notes}
+                  onChange={(e) => setFollowUpForm({ ...followUpForm, notes: e.target.value })}
+                  placeholder="请输入复诊注意事项，如：按时服药、注意饮食、避免剧烈运动等"
+                  rows={3}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none"
+                />
+              </div>
+
+              {followUpForm.date && (
+                <div className="bg-blue-50 rounded-xl p-4">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="w-5 h-5 text-blue-500 mt-0.5 flex-shrink-0" />
+                    <div className="text-sm text-blue-700">
+                      <p className="font-medium">系统将自动提醒主人</p>
+                      <p className="text-blue-600/80 mt-1">
+                        复诊日期前3天内系统会自动发送消息提醒宠物主人按时复诊。
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="p-6 border-t border-gray-100 flex gap-3">
+              <button
+                onClick={() => setShowFollowUpEdit(false)}
+                className="flex-1 px-4 py-2.5 border border-gray-300 text-gray-700 rounded-xl font-medium hover:bg-gray-50 transition-colors"
+              >
+                取消
+              </button>
+              <button
+                onClick={handleSaveFollowUp}
+                className="flex-1 px-4 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl font-medium transition-colors flex items-center justify-center gap-2"
+              >
+                <Save className="w-4 h-4" />
+                保存设置
               </button>
             </div>
           </div>

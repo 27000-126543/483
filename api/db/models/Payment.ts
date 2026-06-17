@@ -72,6 +72,15 @@ export class PaymentModel extends BaseModel<Payment> {
     return Math.floor(points / 100);
   }
 
+  calculateOptimalPoints(pointsAvailable: number, amountAfterDiscount: number): { pointsUsed: number; deduction: number } {
+    const maxDeductionNeeded = Math.max(0, amountAfterDiscount);
+    const pointsNeededForFull = Math.ceil(maxDeductionNeeded) * 100;
+    const optimalPoints = Math.min(pointsAvailable, pointsNeededForFull);
+    const pointsUsed = Math.floor(optimalPoints / 100) * 100;
+    const deduction = Math.min(pointsUsed / 100, maxDeductionNeeded);
+    return { pointsUsed, deduction };
+  }
+
   calculateEarnedPoints(amount: number): number {
     return Math.floor(amount);
   }

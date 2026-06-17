@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/authStore.js';
 import {
   CreditCard, Receipt, Star, Clock, CheckCircle, AlertCircle,
   ChevronRight, X, Pill, Minus, Plus, FileText, Store, TrendingUp,
-  DollarSign, Percent, Coins
+  DollarSign, Percent, Coins, MapPin, Package, QrCode, ArrowRight
 } from 'lucide-react';
 
 interface PaymentDetail extends Payment {
@@ -19,6 +19,18 @@ interface PaymentDetail extends Payment {
   ownerName?: string;
   pointsUsed?: number;
   earnedPoints?: number;
+  storeName?: string;
+  storeAddress?: string;
+  storePhone?: string;
+  prescriptionStatus?: string;
+  needConfirmation?: boolean;
+  dispenseRecord?: {
+    id: string;
+    pharmacistName?: string;
+    pickupCode: string;
+    dispensedAt?: string;
+  } | null;
+  pickupStatus?: 'pending_review' | 'pending_dispense' | 'ready' | 'dispensed';
 }
 
 export default function Payments() {
@@ -562,6 +574,93 @@ export default function Payments() {
                     </span>
                     <span className="text-blue-600">-¥{selectedPayment.pointsDeduction.toFixed(2)}</span>
                   </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-sm font-medium text-gray-700 mb-3 flex items-center gap-2">
+                  <Package className="w-4 h-4" />
+                  取药状态
+                </p>
+                <div className="bg-gray-50 rounded-xl p-4 space-y-3">
+                  {selectedPayment.pickupStatus === 'pending_review' && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-yellow-100 rounded-lg flex items-center justify-center">
+                        <Clock className="w-5 h-5 text-yellow-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-800">处方待审核</p>
+                        <p className="text-sm text-gray-500">医生已开具处方，等待药师正在审核中</p>
+                      </div>
+                    </div>
+                  )}
+                  {selectedPayment.pickupStatus === 'pending_dispense' && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
+                        <Pill className="w-5 h-5 text-blue-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-800">待配药</p>
+                        <p className="text-sm text-gray-500">处方审核通过，药师正在配药</p>
+                      </div>
+                    </div>
+                  )}
+                  {selectedPayment.pickupStatus === 'ready' && (
+                    <div className="space-y-3">
+                      <div className="flex items-center gap-3">
+                        <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                          <QrCode className="w-5 h-5 text-green-600" />
+                        </div>
+                        <div>
+                          <p className="font-medium text-gray-800">已配药完成</p>
+                          <p className="text-sm text-gray-500">凭取药码到门店取药</p>
+                        </div>
+                      </div>
+                      <div className="bg-white rounded-lg p-3 text-center">
+                        <p className="text-xs text-gray-500 mb-1">取药码</p>
+                        <p className="text-2xl font-bold text-green-600 tracking-widest">
+                          {selectedPayment.dispenseRecord?.pickupCode || '-'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {selectedPayment.pickupStatus === 'dispensed' && (
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 bg-green-100 rounded-lg flex items-center justify-center">
+                        <CheckCircle className="w-5 h-5 text-green-600" />
+                      </div>
+                      <div>
+                        <p className="font-medium text-gray-800">已取药</p>
+                        <p className="text-sm text-gray-500">
+                          {selectedPayment.dispenseRecord?.pharmacistName
+                            ? `由${selectedPayment.dispenseRecord.pharmacistName}配药`
+                            : '药品已发放'}
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                  {!selectedPayment.pickupStatus && (
+                    <div className="text-center py-2 text-gray-500 text-sm">
+                      暂无取药信息
+                    </div>
+                  )}
+
+                  {selectedPayment.storeName && (
+                    <div className="pt-3 border-t border-gray-200">
+                      <div className="flex items-start gap-2">
+                        <MapPin className="w-4 h-4 text-gray-400 mt-0.5 flex-shrink-0" />
+                        <div className="text-sm">
+                          <p className="text-gray-700 font-medium">{selectedPayment.storeName}</p>
+                          {selectedPayment.storeAddress && (
+                            <p className="text-gray-500 text-xs mt-1">{selectedPayment.storeAddress}</p>
+                          )}
+                          {selectedPayment.storePhone && (
+                            <p className="text-gray-500 text-xs mt-1">电话：{selectedPayment.storePhone}</p>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

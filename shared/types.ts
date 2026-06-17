@@ -18,7 +18,7 @@ export interface Doctor {
   rating: number;
 }
 
-export type MessageType = 'appointment' | 'prescription' | 'payment' | 'complaint' | 'system';
+export type MessageType = 'appointment' | 'prescription' | 'payment' | 'complaint' | 'system' | 'follow_up';
 
 export type MemberTransactionType = 'earn' | 'spend' | 'adjust';
 
@@ -97,6 +97,8 @@ export interface MedicalRecord {
   treatment?: string;
   notes?: string;
   prescriptionId?: string;
+  followUpDate?: string;
+  followUpNotes?: string;
   createdAt: string;
 }
 

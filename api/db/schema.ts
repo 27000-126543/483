@@ -95,6 +95,8 @@ export function createTables(): void {
       diagnosis TEXT NOT NULL,
       treatment TEXT,
       notes TEXT,
+      follow_up_date DATE,
+      follow_up_notes TEXT,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (appointment_id) REFERENCES appointments(id),
       FOREIGN KEY (doctor_id) REFERENCES users(id)

@@ -14,6 +14,8 @@ export class MedicalRecordModel extends BaseModel<MedicalRecord> {
       treatment: row.treatment,
       notes: row.notes,
       prescriptionId: row.prescription_id || undefined,
+      followUpDate: row.follow_up_date || undefined,
+      followUpNotes: row.follow_up_notes || undefined,
       createdAt: row.created_at
     };
   }
@@ -97,10 +99,45 @@ export class MedicalRecordModel extends BaseModel<MedicalRecord> {
       fields.push('notes = ?');
       params.push(data.notes);
     }
+    if (data.followUpDate !== undefined) {
+      fields.push('follow_up_date = ?');
+      params.push(data.followUpDate || null);
+    }
+    if (data.followUpNotes !== undefined) {
+      fields.push('follow_up_notes = ?');
+      params.push(data.followUpNotes || null);
+    }
 
     params.push(id);
     executeQuery(`UPDATE medical_records SET ${fields.join(', ')} WHERE id = ?`, params);
     return this.findById(id)!;
+  }
+
+  findUpcomingFollowUps(startDate: string, endDate: string): any[] {
+    const rows = fetchAll(
+      `SELECT mr.*, a.pet_id, a.owner_id, a.store_id, a.symptoms
+       FROM medical_records mr
+       JOIN appointments a ON mr.appointment_id = a.id
+       WHERE mr.follow_up_date IS NOT NULL
+       AND mr.follow_up_date >= ?
+       AND mr.follow_up_date <= ?
+       AND a.status = 'completed'
+       ORDER BY mr.follow_up_date ASC`,
+      [startDate, endDate]
+    );
+    return rows.map(row => ({
+      id: row.id,
+      appointmentId: row.appointment_id,
+      doctorId: row.doctor_id,
+      diagnosis: row.diagnosis,
+      followUpDate: row.follow_up_date,
+      followUpNotes: row.follow_up_notes,
+      petId: row.pet_id,
+      ownerId: row.owner_id,
+      storeId: row.store_id,
+      symptoms: row.symptoms,
+      createdAt: row.created_at
+    }));
   }
 }
 

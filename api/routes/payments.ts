@@ -5,6 +5,8 @@ import { appointmentModel } from '../db/models/Appointment.js';
 import { prescriptionModel } from '../db/models/Prescription.js';
 import { medicalRecordModel } from '../db/models/MedicalRecord.js';
 import { medicineModel } from '../db/models/Medicine.js';
+import { dispenseRecordModel } from '../db/models/DispenseRecord.js';
+import { storeModel } from '../db/models/Store.js';
 import { AuthRequest, authMiddleware, requireRole } from '../middleware/auth.js';
 import { sendNotification } from '../services/socket.js';
 import { fetchAll } from '../db/database.js';
@@ -71,12 +73,13 @@ router.post('/calculate', authMiddleware, requireRole('owner'), (req: AuthReques
 
     const memberDiscount = paymentModel.calculateMemberDiscount(originalAmount, user.memberLevel);
 
-    const actualUsePoints = Math.min(Math.max(0, usePoints), user.memberPoints);
-    const pointsDeduction = paymentModel.calculatePointsDeduction(actualUsePoints);
+    const maxUsablePoints = Math.min(Math.max(0, usePoints), user.memberPoints);
+    const amountAfterDiscount = originalAmount - memberDiscount;
+    const { pointsUsed: optimalPointsUsed, deduction: pointsDeduction } = paymentModel.calculateOptimalPoints(maxUsablePoints, amountAfterDiscount);
 
     const finalAmount = Math.max(0, Math.round((originalAmount - memberDiscount - pointsDeduction) * 100) / 100);
     const earnedPoints = paymentModel.calculateEarnedPoints(finalAmount);
-    const remainingPoints = user.memberPoints - actualUsePoints + earnedPoints;
+    const remainingPoints = user.memberPoints - optimalPointsUsed + earnedPoints;
 
     const response: CalculatePaymentResponse = {
       appointmentId: appointment.id,
@@ -87,7 +90,7 @@ router.post('/calculate', authMiddleware, requireRole('owner'), (req: AuthReques
       originalAmount,
       memberLevel: user.memberLevel,
       memberDiscount,
-      pointsUsed: actualUsePoints,
+      pointsUsed: optimalPointsUsed,
       pointsDeduction,
       remainingPoints,
       finalAmount,
@@ -145,8 +148,9 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
     const originalAmount = medicineTotal + CONSULTATION_FEE;
 
     const memberDiscount = paymentModel.calculateMemberDiscount(originalAmount, user.memberLevel);
-    const actualUsePoints = Math.min(Math.max(0, usePoints || 0), user.memberPoints);
-    const pointsDeduction = paymentModel.calculatePointsDeduction(actualUsePoints);
+    const maxUsablePoints = Math.min(Math.max(0, usePoints || 0), user.memberPoints);
+    const amountAfterDiscount = originalAmount - memberDiscount;
+    const { pointsUsed: optimalPointsUsed, deduction: pointsDeduction } = paymentModel.calculateOptimalPoints(maxUsablePoints, amountAfterDiscount);
     const serverFinalAmount = Math.max(0, Math.round((originalAmount - memberDiscount - pointsDeduction) * 100) / 100);
 
     if (Math.abs(serverFinalAmount - amount) > 0.01) {
@@ -179,14 +183,14 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
           paidAt: new Date().toISOString()
         });
 
-    if (actualUsePoints > 0) {
-      userModel.updatePoints(req.user.id, -actualUsePoints);
+    if (optimalPointsUsed > 0) {
+      userModel.updatePoints(req.user.id, -optimalPointsUsed);
       paymentModel.addTransaction({
         userId: req.user.id,
         paymentId: payment.id,
         type: 'spend',
-        pointsChange: -actualUsePoints,
-        balanceAfter: user.memberPoints - actualUsePoints,
+        pointsChange: -optimalPointsUsed,
+        balanceAfter: user.memberPoints - optimalPointsUsed,
         description: '支付抵扣'
       });
     }
@@ -198,7 +202,7 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
         paymentId: payment.id,
         type: 'earn',
         pointsChange: earnedPoints,
-        balanceAfter: user.memberPoints - actualUsePoints + earnedPoints,
+        balanceAfter: user.memberPoints - optimalPointsUsed + earnedPoints,
         description: '消费赠送'
       });
     }
@@ -235,7 +239,7 @@ router.post('/', authMiddleware, requireRole('owner'), async (req: AuthRequest, 
         consultationFee: CONSULTATION_FEE,
         medicineAmount: medicineTotal,
         medicineItems,
-        pointsUsed: actualUsePoints,
+        pointsUsed: optimalPointsUsed,
         earnedPoints,
         memberLevel: user.memberLevel
       },
@@ -308,6 +312,9 @@ router.get('/:id', authMiddleware, (req: AuthRequest, res: Response): void => {
       };
     });
 
+    const dispenseRecord = prescription ? dispenseRecordModel.findByPrescriptionId(prescription.id) : null;
+    const pharmacist = dispenseRecord?.pharmacistId ? userModel.findById(dispenseRecord.pharmacistId) : null;
+    const store = appointment.storeId ? storeModel.findById(appointment.storeId) : null;
     const user = userModel.findById(appointment.ownerId);
 
     res.json({
@@ -320,11 +327,69 @@ router.get('/:id', authMiddleware, (req: AuthRequest, res: Response): void => {
       medicineItems,
       memberLevel: user?.memberLevel || 1,
       ownerName: user?.name,
-      storeId: appointment.storeId
+      storeId: appointment.storeId,
+      storeName: store?.name,
+      storeAddress: store?.address,
+      storePhone: store?.phone,
+      prescriptionStatus: prescription?.status || null,
+      needConfirmation: prescription?.needConfirmation || false,
+      dispenseRecord: dispenseRecord ? {
+        ...dispenseRecord,
+        pharmacistName: pharmacist?.name
+      } : null,
+      pickupStatus: dispenseRecord
+        ? (dispenseRecord.dispensedAt ? 'dispensed' : 'ready')
+        : (prescription?.status === 'reviewed' ? 'pending_dispense' : 'pending_review')
     });
   } catch (error) {
     console.error('获取支付详情失败:', error);
     res.status(500).json({ error: '获取支付详情失败' });
+  }
+});
+
+router.get('/store/:storeId/orders', authMiddleware, requireRole('manager', 'admin', 'pharmacist'), (req: AuthRequest, res: Response): void => {
+  try {
+    const { startDate, endDate } = req.query;
+    if (!startDate || !endDate) {
+      res.status(400).json({ error: '请提供开始和结束日期' });
+      return;
+    }
+
+    const rows = fetchAll(
+      `SELECT p.*, a.appointment_code, a.appointment_time, u.name as owner_name,
+              u.phone as owner_phone,
+              p.points_deduction as points_deduction
+       FROM payments p
+       JOIN appointments a ON p.appointment_id = a.id
+       JOIN users u ON a.owner_id = u.id
+       WHERE p.status = 'paid'
+       AND a.store_id = ?
+       AND p.paid_at >= ?
+       AND p.paid_at <= ?
+       ORDER BY p.paid_at DESC`,
+      [req.params.storeId, startDate as string, endDate as string]
+    );
+
+    res.json({
+      count: rows.length,
+      orders: rows.map((r: any) => ({
+        paymentId: r.id,
+        appointmentId: r.appointment_id,
+        appointmentCode: r.appointment_code,
+        appointmentTime: r.appointment_time,
+        ownerName: r.owner_name,
+        ownerPhone: r.owner_phone,
+        originalAmount: r.original_amount,
+        memberDiscount: r.member_discount,
+        pointsDeduction: r.points_deduction,
+        finalAmount: r.final_amount,
+        paymentMethod: r.payment_method,
+        paidAt: r.paid_at
+      }))
+    });
+  } catch (error) {
+    console.error('获取门店订单明细失败:', error);
+    res.status(500).json({ error: '获取门店订单明细失败' });
   }
 });
 
@@ -335,6 +400,9 @@ router.get('/summary/by-store', authMiddleware, requireRole('manager', 'admin'),
       res.status(400).json({ error: '请提供开始和结束日期' });
       return;
     }
+
+    const startDateTime = `${startDate as string} 00:00:00`;
+    const endDateTime = `${endDate as string} 23:59:59`;
 
     const rows = fetchAll(
       `SELECT a.store_id, s.name as store_name,
@@ -351,7 +419,7 @@ router.get('/summary/by-store', authMiddleware, requireRole('manager', 'admin'),
        AND p.paid_at <= ?
        GROUP BY a.store_id, s.name
        ORDER BY total_revenue DESC`,
-      [startDate as string, endDate as string]
+      [startDateTime, endDateTime]
     );
 
     const overall = {
